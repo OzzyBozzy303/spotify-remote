@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spotify Remote Control</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background: linear-gradient(135deg, #1e3a20 0%, #000000 50%, #000000 100%);
+            min-height: 100vh;
+        }
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            background: #374151;
+            border-radius: 10px;
+            height: 4px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #22c55e;
+            cursor: pointer;
+        }
+        input[type="range"]::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #22c55e;
+            cursor: pointer;
+            border: none;
+        }
+    </style>
+</head>
+<body class="text-white">
+    <div id="app"></div>
+
+    <script>
+        const CLIENT_ID = '98131b95af8f4e208e0c3a03fcf54055';
+        const REDIRECT_URI = window.location.origin + window.location.pathname;
+        const SCOPES = 'user-read-playback-state user-modify-playback-state user-read-currently-playing playlist-read-private user-library-read';
+
+        let accessToken = null;
+        let currentTrack = null;
+        let isPlaying = false;
+        let volume = 50;
+        let progress = 0;
+        let duration = 0;
+        let deviceId = null;
+        let view = 'player';
+        let playlists = [];
+        let searchQuery = '';
+        let searchResults = [];
+        let shuffle = false;
+        let repeat = 'off';
+        let updateInterval = null;
+
+        // Icons als SVG
+        const icons = {
+            music: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>',
+            play: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>',
+            pause: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>',
+            skipBack: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="19 20 9 12 19 4 19 20"></polygon><line x1="5" y1="19" x2="5" y2="5"></line></svg>',
+            skipForward: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg>',
+            volume: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>',
+            search: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>',
+            list: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>',
+            shuffle: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></svg>',
+            repeat: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>'
+        };
+
+        function init() {
+            const hash = window.location.hash.substring(1);
+            const params = new URLSearchParams(hash);
+            const token = params.get('access_token');
+            
+            if (token) {
+                accessToken = token;
+                window.history.replaceState({}, document.title, window.location.pathname);
+                fetchCurrentPlayback();
+                fetchPlaylists();
+                startUpdateInterval();
+            }
+            
+            render();
+        }
+
+        function login() {
+            const authUrl = `https://accounts.spotify.com/authorize?client_id=${CLIENT_ID}&response_type=token&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${encodeURIComponent(SCOPES)}`;
+            window.location.href = authUrl;
+        }
+
+        function startUpdateInterval() {
+            if (updateInterval) clearInterval(updateInterval);
+            updateInterval = setInterval(() => {
+                if (accessToken && currentTrack) {
+                    fetchCurrentPlayback();
+                }
+            }, 1000);
+        }
+
+        async function fetchCurrentPlayback() {
+            try {
+                const response = await fetch('https://api.spotify.com/v1/me/player', {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+                
+                if (response.status === 204) return;
+                
+                const data = await response.json();
+                if (data.item) {
+                    currentTrack = data.item;
+                    isPlaying = data.is_playing;
+                    progress = data.progress_ms;
+                    duration = data.item.duration_ms;
+                    volume = data.device.volume_percent || 50;
+                    deviceId = data.device.id;
+                    shuffle = data.shuffle_state;
+                    repeat = data.repeat_state;
+                    render();
+                }
+            } catch (error) {
+                console.error('Error fetching playback:', error);
+            }
+        }
+
+        async function fetchPlaylists() {
+            try {
+                const response = await fetch('https://api.spotify.com/v1/me/playlists?limit=50', {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+                const data = await response.json();
+                playlists = data.items || [];
+                render();
+            } catch (error) {
+                console.error('Error fetching playlists:', error);
+            }
+        }
+
+        async function searchTracks() {
+            if (!searchQuery.trim()) return;
+            
+            try {
+                const response = await fetch(`https://api.spotify.com/v1/search?q=${encodeURIComponent(searchQuery)}&type=track&limit=20`, {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+                const data = await response.json();
+                searchResults = data.tracks?.items || [];
+                render();
+            } catch (error) {
+                console.error('Error searching:', error);
+            }
+        }
+
+        async function playTrack(uri) {
+            try {
+                await fetch(`https://api.spotify.com/v1/me/player/play${deviceId ? `?device_id=${deviceId}` : ''}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ uris: [uri] })
+                });
+                setTimeout(fetchCurrentPlayback, 500);
+            } catch (error) {
+                console.error('Error playing track:', error);
+            }
+        }
+
+        async function playPlaylist(uri) {
+            try {
+                await fetch(`https://api.spotify.com/v1/me/player/play${deviceId ? `?device_id=${deviceId}` : ''}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ context_uri: uri })
+                });
+                setTimeout(fetchCurrentPlayback, 500);
+                view = 'player';
+                render();
+            } catch (error) {
+                console.error('Error playing playlist:', error);
+            }
+        }
+
+        async function togglePlay() {
+            const endpoint = isPlaying ? 'pause' : 'play';
+            try {
+                await fetch(`https://api.spotify.com/v1/me/player/${endpoint}`, {
+                    method: 'PUT',
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+                isPlaying = !isPlaying;
+                render();
+            } catch (error) {
+                console.error('Error toggling play:', error);
+            }
+        }
+
+        async function skipTrack(direction) {
+            try {
+                await fetch(`https://api.spotify.com/v1/me/player/${direction}`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+                setTimeout(fetchCurrentPlayback, 500);
+            } catch (error) {
+                console.error('Error skipping:', error);
+            }
+        }
+
+        async function changeVolume(newVolume) {
+            volume = newVolume;
+            render();
+            try {
+                await fetch(`https://api.spotify.com/v1/me/player/volume?volume_percent=${newVolume}`, {
+                    method: 'PUT',
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+            } catch (error) {
+                console.error('Error changing volume:', error);
+            }
+        }
+
+        async function toggleShuffle() {
+            try {
+                await fetch(`https://api.spotify.com/v1/me/player/shuffle?state=${!shuffle}`, {
+                    method: 'PUT',
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+                shuffle = !shuffle;
+                render();
+            } catch (error) {
+                console.error('Error toggling shuffle:', error);
+            }
+        }
+
+        async function toggleRepeat() {
+            const states = ['off', 'context', 'track'];
+            const currentIndex = states.indexOf(repeat);
+            const newState = states[(currentIndex + 1) % states.length];
+            
+            try {
+                await fetch(`https://api.spotify.com/v1/me/player/repeat?state=${newState}`, {
+                    method: 'PUT',
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+                repeat = newState;
+                render();
+            } catch (error) {
+                console.error('Error toggling repeat:', error);
+            }
+        }
+
+        function formatTime(ms) {
+            const seconds = Math.floor(ms / 1000);
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function render() {
+            const app = document.getElementById('app');
+            
+            if (!accessToken) {
+                app.innerHTML = `
+                    <div class="min-h-screen flex items-center justify-center p-4">
+                        <div class="text-center max-w-md">
+                            <div class="w-24 h-24 mx-auto mb-6 text-green-500">${icons.music}</div>
+                            <h1 class="text-4xl font-bold mb-4">Spotify Remote</h1>
+                            <p class="text-gray-400 mb-8">Steuere Spotify auf deinem PC/Mac direkt von deinem Handy</p>
+                            <button onclick="login()" class="bg-green-500 hover:bg-green-600 text-black font-bold py-4 px-8 rounded-full text-lg transition-all transform hover:scale-105">
+                                Mit Spotify verbinden
+                            </button>
+                            <div class="mt-8 text-sm text-gray-500">
+                                <p>Redirect URI für Spotify Dashboard:</p>
+                                <code class="bg-black/50 px-3 py-1 rounded block mt-2">${REDIRECT_URI}</code>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+
+            let content = '';
+
+            if (view === 'player' && currentTrack) {
+                content = `
+                    <div class="pb-24 px-6 pt-8">
+                        <div class="max-w-md mx-auto">
+                            <div class="aspect-square rounded-2xl overflow-hidden shadow-2xl mb-8">
+                                <img src="${currentTrack.album.images[0]?.url}" alt="${currentTrack.name}" class="w-full h-full object-cover">
+                            </div>
+                            <div class="mb-6">
+                                <h2 class="text-2xl font-bold mb-2 truncate">${currentTrack.name}</h2>
+                                <p class="text-gray-400 truncate">${currentTrack.artists.map(a => a.name).join(', ')}</p>
+                            </div>
+                            <div class="mb-6">
+                                <input type="range" min="0" max="${duration}" value="${progress}" class="w-full" disabled>
+                                <div class="flex justify-between text-xs text-gray-400 mt-2">
+                                    <span>${formatTime(progress)}</span>
+                                    <span>${formatTime(duration)}</span>
+                                </div>
+                            </div>
+                            <div class="flex items-center justify-center gap-6 mb-8">
+                                <button onclick="skipTrack('previous')" class="text-gray-400 hover:text-white transition">${icons.skipBack}</button>
+                                <button onclick="togglePlay()" class="bg-white text-black rounded-full p-4 hover:scale-110 transition-transform w-16 h-16 flex items-center justify-center">
+                                    ${isPlaying ? icons.pause : icons.play}
+                                </button>
+                                <button onclick="skipTrack('next')" class="text-gray-400 hover:text-white transition">${icons.skipForward}</button>
+                            </div>
+                            <div class="flex items-center justify-between mb-6">
+                                <button onclick="toggleShuffle()" class="transition ${shuffle ? 'text-green-500' : 'text-gray-400 hover:text-white'}">${icons.shuffle}</button>
+                                <button onclick="toggleRepeat()" class="transition ${repeat !== 'off' ? 'text-green-500' : 'text-gray-400 hover:text-white'}">${icons.repeat}${repeat === 'track' ? ' <span class="text-xs">1</span>' : ''}</button>
+                            </div>
+                            <div class="flex items-center gap-4">
+                                <div class="w-5 h-5 text-gray-400">${icons.volume}</div>
+                                <input type="range" min="0" max="100" value="${volume}" onchange="changeVolume(this.value)" class="flex-1">
+                                <span class="text-sm text-gray-400 w-10">${volume}%</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else if (view === 'playlists') {
+                content = `
+                    <div class="pb-24 px-6 pt-8">
+                        <h2 class="text-2xl font-bold mb-6">Deine Playlists</h2>
+                        <div class="space-y-3">
+                            ${playlists.map(playlist => `
+                                <button onclick="playPlaylist('${playlist.uri}')" class="w-full flex items-center gap-4 bg-white/5 hover:bg-white/10 rounded-lg p-3 transition">
+                                    <img src="${playlist.images[0]?.url || 'https://via.placeholder.com/60'}" alt="${playlist.name}" class="w-16 h-16 rounded">
+                                    <div class="flex-1 text-left">
+                                        <h3 class="font-semibold truncate">${playlist.name}</h3>
+                                        <p class="text-sm text-gray-400">${playlist.tracks.total} Songs</p>
+                                    </div>
+                                </button>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            } else if (view === 'search') {
+                content = `
+                    <div class="pb-24 px-6 pt-8">
+                        <div class="mb-6">
+                            <div class="flex gap-2">
+                                <input type="text" value="${searchQuery}" oninput="searchQuery = this.value" onkeypress="if(event.key==='Enter') searchTracks()" placeholder="Suche Songs, Künstler..." class="flex-1 bg-white/10 rounded-lg px-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500">
+                                <button onclick="searchTracks()" class="bg-green-500 hover:bg-green-600 px-6 rounded-lg transition">${icons.search}</button>
+                            </div>
+                        </div>
+                        <div class="space-y-2">
+                            ${searchResults.map(track => `
+                                <button onclick="playTrack('${track.uri}')" class="w-full flex items-center gap-3 bg-white/5 hover:bg-white/10 rounded-lg p-3 transition">
+                                    <img src="${track.album.images[2]?.url || track.album.images[0]?.url}" alt="${track.name}" class="w-12 h-12 rounded">
+                                    <div class="flex-1 text-left">
+                                        <h3 class="font-semibold text-sm truncate">${track.name}</h3>
+                                        <p class="text-xs text-gray-400 truncate">${track.artists.map(a => a.name).join(', ')}</p>
+                                    </div>
+                                </button>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            const navigation = `
+                <div class="fixed bottom-0 left-0 right-0 bg-black/90 backdrop-blur border-t border-gray-800 flex justify-around p-4 z-50">
+                    <button onclick="view='player'; render();" class="flex flex-col items-center gap-1 ${view === 'player' ? 'text-green-500' : 'text-gray-400'}">
+                        ${icons.music}
+                        <span class="text-xs">Player</span>
+                    </button>
+                    <button onclick="view='playlists'; render();" class="flex flex-col items-center gap-1 ${view === 'playlists' ? 'text-green-500' : 'text-gray-400'}">
+                        ${icons.list}
+                        <span class="text-xs">Playlists</span>
+                    </button>
+                    <button onclick="view='search'; render();" class="flex flex-col items-center gap-1 ${view === 'search' ? 'text-green-500' : 'text-gray-400'}">
+                        ${icons.search}
+                        <span class="text-xs">Suche</span>
+                    </button>
+                </div>
+            `;
+
+            app.innerHTML = content + navigation;
+        }
+
+        init();
+    </script>
+</body>
+</html>
